@@ -1,0 +1,50 @@
+# Checks a MIRA FIVE PHP SDK: Pint, PHPStan and Pest (the repository's `composer check`) on the
+# oldest supported PHP with the lowest dependencies and on the newest with the highest.
+# `contract: true` also validates what the SDK sends with @mirafive/protocol, as the ingest would.
+name: php-sdk
+
+on:
+  workflow_call:
+    inputs:
+      contract:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: "8.3"
+            image: mirror.gcr.io/library/php:8.3-cli-alpine@sha256:66e726c387bd539888c3d05f4e2c8b03c85566805a02476fdfb7ca8d3592c2db
+            dependencies: lowest
+          - php: "8.5"
+            image: mirror.gcr.io/library/php:8.5-cli-alpine@sha256:d1fbbe78850d1eb9aa8f7da652ec5db61eb4c9377c8215cf5e23f3b528ed4f2b
+            dependencies: highest
+    name: php ${{ matrix.php }} (${{ matrix.dependencies }})
+    container: ${{ matrix.image }}
+    timeout-minutes: 15
+    env:
+      COMPOSER_NO_INTERACTION: "1"
+    steps:
+      # Without git, checkout downloads an archive, and export-ignore would drop tests and configs.
+      - run: apk add --no-cache -q git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Composer 2.11.1
+        run: |
+          wget -q -O /usr/local/bin/composer https://getcomposer.org/download/2.11.1/composer.phar
+          echo "6f1b891e1d4927d62740276c540fb490e47689e19e102c49e8da849794882f8c  /usr/local/bin/composer" | sha256sum -c -
+          chmod +x /usr/local/bin/composer
+      - run: composer update --prefer-dist --no-progress --prefer-stable ${{ matrix.dependencies == 'lowest' && '--prefer-lowest' || '' }}
+      - run: composer check
+      - if: inputs.contract && matrix.dependencies == 'highest'
+        name: What the SDK sends is valid for the ingest
+        run: |
+          apk add --no-cache -q nodejs npm
+          php tests/contract/emit.php > batches.json
+          npx --yes @mirafive/protocol@^2 batches.json

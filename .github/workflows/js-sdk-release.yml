@@ -1,0 +1,70 @@
+# Releases a MIRA FIVE JavaScript SDK when main has a version that is not tagged yet: bump
+# `version` in package.json, add its `## x.y.z — date` section to CHANGELOG.md, merge. The package
+# is built and checked again, published to npm with provenance, tagged, and released on GitHub.
+#
+# npm: trusted publishing (no token) once the package's trusted publisher is set on npmjs.com;
+# until then the organisation secret NPM_TOKEN.
+name: js-sdk-release
+
+on:
+  workflow_call:
+    secrets:
+      NPM_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # tag and GitHub release
+      id-token: write # npm provenance and trusted publishing
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - id: plan
+        run: |
+          version=$(node -p 'require("./package.json").version')
+          name=$(node -p 'require("./package.json").name')
+          echo "version=$version" >> "$GITHUB_OUTPUT"; echo "name=$name" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "release=false" >> "$GITHUB_OUTPUT"; echo "v$version is released already."; exit 0
+          fi
+          grep -q "^## $version " CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## $version ' section"; exit 1; }
+          echo "release=true" >> "$GITHUB_OUTPUT"
+      - if: steps.plan.outputs.release == 'true'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - if: steps.plan.outputs.release == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - if: steps.plan.outputs.release == 'true'
+        run: bun install --frozen-lockfile && bun run check
+      - if: steps.plan.outputs.release == 'true'
+        name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NAME: ${{ steps.plan.outputs.name }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then echo "$NAME@$VERSION is on npm already"; exit 0; fi
+          tag=latest; case "$VERSION" in *-*) tag=next ;; esac
+          npm publish --access public --provenance --tag "$tag"
+      - if: steps.plan.outputs.release == 'true'
+        name: Tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v$VERSION" -m "v$VERSION" && git push origin "v$VERSION"
+          awk -v v="$VERSION" '$0 ~ "^## "v" " {f=1; next} /^## / {if (f) exit} f' CHANGELOG.md > notes.md
+          gh release create "v$VERSION" --verify-tag --title "v$VERSION" --notes-file notes.md

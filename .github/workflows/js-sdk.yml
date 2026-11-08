@@ -1,0 +1,40 @@
+# Checks a MIRA FIVE JavaScript SDK on every push and pull request: format, lint, types, tests and
+# build (the repository's own `bun run check`), then the built package the way an app meets it
+# (scripts/verify-package.ts). Called by each SDK repository's ci.yml.
+name: js-sdk
+
+on:
+  workflow_call:
+    inputs:
+      script-budget:
+        description: Gzip budget in bytes for dist/mira.js (only @mirafive/web has one).
+        type: number
+        default: 0
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: package.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      # The tooling at the same commit as this workflow.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: mirafive/.github
+          ref: ${{ job.workflow_sha || 'main' }}
+          path: .mirafive
+          persist-credentials: false
+      - run: bun .mirafive/scripts/verify-package.ts . --script-budget "$BUDGET"
+        env:
+          BUDGET: ${{ inputs.script-budget }}
