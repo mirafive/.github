@@ -98,7 +98,9 @@ console.log("✓ every import is a declared dependency or peer");
 const app = await mkdtemp(`${tmpdir()}/mirafive-consumer-`);
 const tarball = (await sh(["npm", "pack", "--silent", "--pack-destination", app], dir)).split("\n").at(-1)!;
 await writeFile(`${app}/package.json`, JSON.stringify({ name: "consumer", private: true, type: "module" }));
-// An app that uses a peer from TypeScript also has its separate types (`react` → `@types/react`).
+// Peers as the app has them, optional ones included (an app using that entry installs it), and
+// their separate types where they have them (`react` → `@types/react`).
+const peers = Object.entries(manifest.peerDependencies ?? {}).map(([name, range]) => `${name}@${range}`);
 const typings: string[] = [];
 for (const peer of Object.keys(manifest.peerDependencies ?? {})) {
   if (peer.startsWith("@")) continue;
@@ -110,7 +112,7 @@ for (const peer of Object.keys(manifest.peerDependencies ?? {})) {
   }
 }
 try {
-  await sh(["npm", "install", "--no-audit", "--no-fund", "--loglevel=error", `./${tarball}`, "typescript@7", "@types/node", ...typings], app);
+  await sh(["npm", "install", "--no-audit", "--no-fund", "--loglevel=error", `./${tarball}`, ...peers, "typescript@7", "@types/node", ...typings], app);
 } catch (error) {
   fail(`the packed package does not install:\n${String(error)}`);
 }
