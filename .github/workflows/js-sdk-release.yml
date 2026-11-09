@@ -2,15 +2,12 @@
 # `version` in package.json, add its `## x.y.z — date` section to CHANGELOG.md, merge. The package
 # is built and checked again, published to npm with provenance, tagged, and released on GitHub.
 #
-# npm: trusted publishing (no token) once the package's trusted publisher is set on npmjs.com;
-# until then the organisation secret NPM_TOKEN.
+# npm: trusted publishing, no token. Each package trusts its own repository's `release.yml` (the
+# caller of this workflow) on npmjs.com; npm exchanges the job's OIDC token for a one-off publish.
 name: js-sdk-release
 
 on:
   workflow_call:
-    secrets:
-      NPM_TOKEN:
-        required: false
 
 permissions:
   contents: read
@@ -44,13 +41,11 @@ jobs:
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
       - if: steps.plan.outputs.release == 'true'
         run: bun install --frozen-lockfile && bun run check
       - if: steps.plan.outputs.release == 'true'
         name: Publish to npm
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NAME: ${{ steps.plan.outputs.name }}
           VERSION: ${{ steps.plan.outputs.version }}
         run: |
